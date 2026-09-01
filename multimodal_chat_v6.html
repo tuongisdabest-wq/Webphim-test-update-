@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multimodal Chat - NVIDIA NIM</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<style>
+  html, body { height: 100%; }
+  body {
+    background: linear-gradient(160deg, #0f172a 0%, #1e1b4b 100%);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+
+  .bubble-user {
+    background: linear-gradient(135deg, #6366f1, #4f46e5);
+    color: #fff;
+    border-radius: 18px 18px 4px 18px;
+  }
+  .bubble-ai {
+    background: #1f2937;
+    color: #e5e7eb;
+    border-radius: 18px 18px 18px 4px;
+    border: 1px solid #374151;
+  }
+  .bubble-error {
+    background: #7f1d1d;
+    color: #fecaca;
+    border-radius: 18px 18px 18px 4px;
+    border: 1px solid #b91c1c;
+  }
+  .prose-ai p { margin: 0 0 0.5em 0; }
+  .prose-ai p:last-child { margin-bottom: 0; }
+  .prose-ai pre {
+    background: #0f172a;
+    padding: 10px;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 0.5em 0;
+  }
+  .prose-ai code {
+    background: #0f172a;
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-size: 0.85em;
+  }
+  .prose-ai pre code { background: none; padding: 0; }
+  .prose-ai ul, .prose-ai ol { margin: 0.4em 0 0.4em 1.2em; }
+  .prose-ai a { color: #93c5fd; text-decoration: underline; }
+  .prose-ai h1, .prose-ai h2, .prose-ai h3 { font-weight: 700; margin: 0.6em 0 0.3em 0; }
+  .prose-ai table { border-collapse: collapse; margin: 0.5em 0; }
+  .prose-ai th, .prose-ai td { border: 1px solid #4b5563; padding: 4px 8px; }
+
+  .typing-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #9ca3af; display: inline-block;
+    animation: blink 1.4s infinite both;
+  }
+  .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink {
+    0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+    40% { opacity: 1; transform: scale(1); }
+  }
+
+  .fade-in { animation: fadeIn 0.25s ease-out; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .slide-in { animation: slideIn 0.2s ease-out; }
+  @keyframes slideIn {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(0); }
+  }
+
+  input[type="file"] { display: none; }
+
+  .preview-wrap { animation: fadeIn 0.2s ease-out; }
+
+  textarea#user-input { max-height: 160px; }
+
+  .glass {
+    background: rgba(17, 24, 39, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .progress-track {
+    height: 4px; background: #374151; border-radius: 999px; overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%; background: linear-gradient(90deg, #6366f1, #8b5cf6);
+    border-radius: 999px; transition: width 0.15s ease-out;
+  }
+
+  .session-item.active { background: rgba(99, 102, 241, 0.18); border-color: #6366f1; }
+
+  input[type="range"] {
+    -webkit-appearance: none; height: 4px; border-radius: 999px;
+    background: #374151; outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: #6366f1; cursor: pointer;
+  }
+
+  .modal-backdrop { background: rgba(0,0,0,0.6); }
+
+  #sidebar { transition: margin-left 0.25s ease-out; }
+  @media (min-width: 768px) {
+    #sidebar-overlay { display: none !important; }
+  }
+
+  /* SỬA: h-screen (100vh) trên mobile tính theo viewport TỐI ĐA (lúc thanh địa chỉ ẩn),
+     nên khi thanh địa chỉ hiện ra lúc cuộn, layout thật sự cao hơn khung nhìn hiển thị
+     -> tab bar dưới cùng bị đẩy khuất/mất. 100dvh tính theo khung nhìn ĐANG hiển thị thực
+     tế nên luôn khớp. Khai báo 2 dòng: trình duyệt cũ không hiểu dvh sẽ tự bỏ qua dòng
+     sau và giữ nguyên 100vh (fallback an toàn). */
+  .app-shell { height: 100vh; height: 100dvh; }
+
+  /* Tab bar mobile: tăng vùng bấm cho ngón tay + phản hồi khi chạm để dễ bấm hơn */
+  #mobile-tabbar button {
+    min-height: 56px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #mobile-tabbar button:active {
+    background: rgba(99, 102, 241, 0.16);
+  }
+</style>
+</head>
+<body class="text-gray-100">
+<div class="app-shell flex h-screen w-screen overflow-hidden">
+
+  <!-- SIDEBAR -->
+  <div id="sidebar-overlay" class="hidden fixed inset-0 bg-black/50 z-30" onclick="closeSidebar()"></div>
+  <aside id="sidebar" class="fixed md:static inset-y-0 left-0 z-40 w-72 -ml-72 md:ml-0 glass border-r border-gray-700 flex flex-col shrink-0">
+    <div class="p-3 border-b border-gray-700">
+      <button id="new-chat-btn" class="w-full flex items-center gap-2 justify-center bg-indigo-600 hover:bg-indigo-500 rounded-xl px-3 py-2.5 text-sm font-medium transition">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        Cuộc trò chuyện mới
+      </button>
+    </div>
+    <div id="session-list" class="flex-1 overflow-y-auto p-2 space-y-1"></div>
+    <div class="p-3 border-t border-gray-700 text-[10px] text-gray-500 text-center">
+      Lịch sử được lưu cục bộ (IndexedDB) trên thiết bị này.
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="flex-1 flex flex-col min-w-0">
+    <!-- HEADER -->
+    <header class="glass border-b border-gray-700 z-20">
+      <div class="flex items-center justify-between px-4 py-3 gap-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <button id="sidebar-toggle" class="hidden md:flex w-9 h-9 shrink-0 rounded-lg hover:bg-gray-700/60 items-center justify-center transition">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+          </button>
+          <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center font-bold text-sm shrink-0">AI</div>
+          <h1 id="session-title" class="text-sm font-semibold tracking-tight truncate">Cuộc trò chuyện mới</h1>
+        </div>
+        <button id="open-settings" class="hidden md:flex shrink-0 text-xs text-gray-400 hover:text-white border border-gray-600 rounded-lg px-3 py-1.5 transition items-center gap-1.5">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"></path></svg>
+          Cài đặt
+        </button>
+      </div>
+    </header>
+
+    <!-- CHAT LOG -->
+    <main id="chat-log" class="flex-1 overflow-y-auto px-4 py-6 space-y-4 max-w-4xl w-full mx-auto">
+      <div class="text-center text-gray-500 text-sm mt-10" id="empty-state">
+        👋 Vào Cài đặt để nhập NVIDIA API Key, sau đó gửi văn bản, ảnh hoặc video để bắt đầu trò chuyện.
+      </div>
+    </main>
+
+    <!-- INPUT AREA -->
+    <footer class="glass border-t border-gray-700 z-20">
+      <div class="max-w-4xl mx-auto px-4 py-3">
+
+        <!-- File preview -->
+        <div id="preview-container" class="hidden preview-wrap mb-2 bg-gray-800/80 border border-gray-600 rounded-xl p-2">
+          <div class="flex items-center gap-3">
+            <div id="preview-media" class="w-16 h-16 rounded-lg overflow-hidden bg-black flex items-center justify-center shrink-0"></div>
+            <div class="flex-1 min-w-0">
+              <p id="preview-name" class="text-xs text-gray-200 truncate"></p>
+              <p id="preview-size" class="text-[11px] text-gray-500"></p>
+              <p id="preview-status" class="text-[11px] text-indigo-400 mt-0.5"></p>
+            </div>
+            <button id="remove-attach" class="text-gray-400 hover:text-red-400 text-lg px-2" title="Bỏ đính kèm">✕</button>
+          </div>
+          <div id="preview-progress-wrap" class="hidden mt-2 progress-track">
+            <div id="preview-progress-fill" class="progress-fill" style="width:0%"></div>
+          </div>
+        </div>
+
+        <div class="flex items-end gap-2">
+          <button id="attach-image-btn" title="Đính kèm ảnh"
+            class="shrink-0 w-11 h-11 rounded-xl bg-gray-800 border border-gray-600 hover:border-indigo-500 hover:bg-gray-700 flex items-center justify-center transition">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg>
+          </button>
+          <input id="attach-image-input" type="file" accept="image/*">
+
+          <button id="attach-video-btn" title="Đính kèm video"
+            class="shrink-0 w-11 h-11 rounded-xl bg-gray-800 border border-gray-600 hover:border-indigo-500 hover:bg-gray-700 flex items-center justify-center transition">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2"></rect></svg>
+          </button>
+          <input id="attach-video-input" type="file" accept="video/*">
+
+          <textarea id="user-input" rows="1" placeholder="Nhập tin nhắn... (Shift+Enter để xuống dòng)"
+            class="flex-1 resize-none bg-gray-800/80 border border-gray-600 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-indigo-500 transition placeholder-gray-500"></textarea>
+
+          <button id="send-btn"
+            class="shrink-0 w-11 h-11 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+          </button>
+        </div>
+        <p class="text-[10px] text-gray-600 mt-2 text-center">API Key được lưu cục bộ trên trình duyệt của bạn và chỉ được gửi trực tiếp tới NVIDIA.</p>
+      </div>
+    </footer>
+
+    <!-- TAB BAR (chỉ mobile) -->
+    <nav id="mobile-tabbar" class="md:hidden shrink-0 glass border-t border-gray-700 flex items-stretch justify-around" style="padding-bottom: env(safe-area-inset-bottom);">
+      <button id="tab-new-chat" class="flex-1 flex flex-col items-center justify-center gap-1 py-2.5 text-gray-400 hover:text-white active:text-indigo-400 transition rounded-lg">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        <span class="text-[11px] font-medium">Đoạn chat mới</span>
+      </button>
+      <button id="tab-sessions" class="flex-1 flex flex-col items-center justify-center gap-1 py-2.5 text-gray-400 hover:text-white active:text-indigo-400 transition rounded-lg">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"></path></svg>
+        <span class="text-[11px] font-medium">Đoạn chat</span>
+      </button>
+      <button id="tab-settings" class="flex-1 flex flex-col items-center justify-center gap-1 py-2.5 text-gray-400 hover:text-white active:text-indigo-400 transition rounded-lg">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"></path></svg>
+        <span class="text-[11px] font-medium">Cài đặt</span>
+      </button>
+    </nav>
+  </div>
+</div>
+
+<!-- SETTINGS MODAL -->
+<div id="settings-modal" class="hidden fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-4">
+  <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-700 sticky top-0 bg-gray-900">
+      <h2 class="font-semibold text-sm">Cài đặt</h2>
+      <button id="close-settings" class="text-gray-400 hover:text-white text-xl leading-none">✕</button>
+    </div>
+    <div class="p-5 space-y-4">
+      <div>
+        <label class="block text-xs text-gray-400 mb-1.5">NVIDIA API Key</label>
+        <div class="relative">
+          <input id="api-key" type="password" placeholder="nvapi-..."
+            class="w-full bg-gray-800/80 border border-gray-600 rounded-lg px-3 py-2 text-sm pr-16 outline-none focus:border-indigo-500 transition placeholder-gray-500">
+          <button id="toggle-key-visibility" type="button"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-gray-400 hover:text-white bg-gray-700/70 px-2 py-1 rounded">Hiện</button>
+        </div>
+        <p id="key-status" class="text-[11px] mt-1.5 text-gray-500"></p>
+        <p class="text-[11px] mt-1 text-gray-600">Lấy key miễn phí tại build.nvidia.com (không cần thẻ).</p>
+      </div>
+
+      <div>
+        <label class="block text-xs text-gray-400 mb-1.5">Model</label>
+        <input id="model-select" type="hidden" value="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning">
+        <div class="w-full bg-gray-800/80 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-300">
+          nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-xs text-gray-400 mb-1.5">System prompt</label>
+        <textarea id="system-prompt" rows="4"
+          class="w-full bg-gray-800/80 border border-gray-600 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500 transition placeholder-gray-500 resize-y"></textarea>
+      </div>
+
+      <div>
+        <div class="flex items-center justify-between mb-1.5">
+          <label class="text-xs text-gray-400">Temperature</label>
+          <span id="temperature-val" class="text-xs text-gray-300 font-mono">0.7</span>
+        </div>
+        <input id="temperature" type="range" min="0" max="2" step="0.05" value="0.7" class="w-full">
+      </div>
+
+      <div>
+        <div class="flex items-center justify-between mb-1.5">
+          <label class="text-xs text-gray-400">Top P</label>
+          <span id="top-p-val" class="text-xs text-gray-300 font-mono">1</span>
+        </div>
+        <input id="top-p" type="range" min="0" max="1" step="0.05" value="1" class="w-full">
+      </div>
+
+      <div>
+        <label class="block text-xs text-gray-400 mb-1.5">Max tokens</label>
+        <input id="max-tokens" type="number" min="1" max="32000" placeholder="Mặc định của model"
+          class="w-full bg-gray-800/80 border border-gray-600 rounded-lg px-3 py-2 text-sm outline-none focus:border-indigo-500 transition placeholder-gray-500">
+      </div>
+
+      <button id="reset-settings" class="text-xs text-gray-500 hover:text-red-400 transition">Khôi phục mặc định</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ================= DEFAULTS =================
+  const DEFAULT_SYSTEM_PROMPT = "Bạn là một trợ lý AI phân tích đa phương tiện. Khi người dùng gửi kèm hình ảnh hoặc video, hãy phân tích toàn diện, chi tiết và khách quan MỌI nội dung xuất hiện trong ảnh hoặc video đó — bao gồm nhưng không giới hạn ở: đối tượng, con người, hành động, bối cảnh, văn bản/chữ viết xuất hiện, màu sắc, bố cục, cảm xúc, và bất kỳ chi tiết đáng chú ý nào khác. Không được tự ý bỏ sót thông tin, không suy diễn thiếu căn cứ, và luôn trả lời trung thực, khách quan, có cấu trúc rõ ràng (có thể dùng danh sách hoặc đoạn văn ngắn) bằng tiếng Việt trừ khi người dùng yêu cầu ngôn ngữ khác.";
+  const DEFAULT_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
+  const NVIDIA_API_URL = "https://tmdb-proxy.tuongisdabest.workers.dev/nvidia-proxy";
+  const NVIDIA_ASSET_CREATE_URL = "https://tmdb-proxy.tuongisdabest.workers.dev/nvidia-asset-create";
+  const NVIDIA_ASSET_UPLOAD_URL = "https://tmdb-proxy.tuongisdabest.workers.dev/nvidia-asset-upload";
+  const DEFAULT_TEMP = 0.7;
+  const DEFAULT_TOP_P = 1;
+
+  // ================= DOM refs =================
+  const $ = (id) => document.getElementById(id);
+
+  const sidebar = $('sidebar');
+  const sidebarOverlay = $('sidebar-overlay');
+  const sidebarToggleBtn = $('sidebar-toggle');
+  const newChatBtn = $('new-chat-btn');
+  const sessionList = $('session-list');
+  const sessionTitleEl = $('session-title');
+
+  const tabNewChatBtn = $('tab-new-chat');
+  const tabSessionsBtn = $('tab-sessions');
+  const tabSettingsBtn = $('tab-settings');
+
+  const openSettingsBtn = $('open-settings');
+  const closeSettingsBtn = $('close-settings');
+  const settingsModal = $('settings-modal');
+  const apiKeyInput = $('api-key');
+  const toggleKeyBtn = $('toggle-key-visibility');
+  const keyStatus = $('key-status');
+  const modelSelect = $('model-select');
+  const systemPromptInput = $('system-prompt');
+  const temperatureInput = $('temperature');
+  const temperatureVal = $('temperature-val');
+  const topPInput = $('top-p');
+  const topPVal = $('top-p-val');
+  const maxTokensInput = $('max-tokens');
+  const resetSettingsBtn = $('reset-settings');
+
+  const chatLog = $('chat-log');
+  const emptyState = $('empty-state');
+
+  const attachImageBtn = $('attach-image-btn');
+  const attachImageInput = $('attach-image-input');
+  const attachVideoBtn = $('attach-video-btn');
+  const attachVideoInput = $('attach-video-input');
+
+  const previewContainer = $('preview-container');
+  const previewMedia = $('preview-media');
+  const previewName = $('preview-name');
+  const previewSize = $('preview-size');
+  const previewStatus = $('preview-status');
+  const previewProgressWrap = $('preview-progress-wrap');
+  const previewProgressFill = $('preview-progress-fill');
+  const removeAttachBtn = $('remove-attach');
+
+  const userInput = $('user-input');
+  const sendBtn = $('send-btn');
+
+  // ================= State =================
+  const LS_API = 'mmchat_api_key';
+  const LS_MODEL = 'mmchat_model';
+  const LS_SYSTEM_PROMPT = 'mmchat_system_prompt';
+  const LS_TEMPERATURE = 'mmchat_temperature';
+  const LS_TOP_P = 'mmchat_top_p';
+  const LS_MAX_TOKENS = 'mmchat_max_tokens';
+
+  let pendingFile = null;      // { file, assetId, mimeType, isVideo, processing, blobUrl }
+  let currentSessionId = null;
+  let sessions = [];           // in-memory index list (id, title, updatedAt)
+  let conversation = [];       // API-format messages for current session
+  let isSending = false;
+
+  // ================= IndexedDB =================
+  const DB_NAME = 'mmchat_db';
+  const DB_VERSION = 1;
+  let dbPromise = null;
+
+  function openDb() {
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('sessions')) {
+          const store = db.createObjectStore('sessions', { keyPath: 'id' });
+          store.createIndex('updatedAt', 'updatedAt');
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return dbPromise;
+  }
+
+  async function dbPutSession(session) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('sessions', 'readwrite');
+      tx.objectStore('sessions').put(session);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async function dbGetSession(id) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('sessions', 'readonly');
+      const req = tx.objectStore('sessions').get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function dbGetAllSessions() {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('sessions', 'readonly');
+      const req = tx.objectStore('sessions').getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async function dbDeleteSession(id) {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('sessions', 'readwrite');
+      tx.objectStore('sessions').delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  function genId() {
+    return 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  }
+
+  // ================= Settings =================
+  function loadSettings() {
+    apiKeyInput.value = localStorage.getItem(LS_API) || '';
+    updateKeyStatus(!!apiKeyInput.value);
+
+    modelSelect.value = DEFAULT_MODEL;
+
+    systemPromptInput.value = localStorage.getItem(LS_SYSTEM_PROMPT) || DEFAULT_SYSTEM_PROMPT;
+
+    const temp = parseFloat(localStorage.getItem(LS_TEMPERATURE));
+    temperatureInput.value = isNaN(temp) ? DEFAULT_TEMP : temp;
+    temperatureVal.textContent = temperatureInput.value;
+
+    const topP = parseFloat(localStorage.getItem(LS_TOP_P));
+    topPInput.value = isNaN(topP) ? DEFAULT_TOP_P : topP;
+    topPVal.textContent = topPInput.value;
+
+    maxTokensInput.value = localStorage.getItem(LS_MAX_TOKENS) || '';
+  }
+
+  function updateKeyStatus(saved) {
+    keyStatus.textContent = saved
+      ? '✓ API Key đã được lưu trên trình duyệt này.'
+      : 'Chưa có API Key. Vui lòng dán NVIDIA API Key (nvapi-...) để bắt đầu.';
+    keyStatus.className = saved ? 'text-[11px] mt-1.5 text-emerald-500' : 'text-[11px] mt-1.5 text-gray-500';
+  }
+
+  apiKeyInput.addEventListener('input', () => {
+    const val = apiKeyInput.value.trim();
+    if (val) { localStorage.setItem(LS_API, val); updateKeyStatus(true); }
+    else { localStorage.removeItem(LS_API); updateKeyStatus(false); }
+  });
+
+  toggleKeyBtn.addEventListener('click', () => {
+    const isPwd = apiKeyInput.type === 'password';
+    apiKeyInput.type = isPwd ? 'text' : 'password';
+    toggleKeyBtn.textContent = isPwd ? 'Ẩn' : 'Hiện';
+  });
+
+  systemPromptInput.addEventListener('input', () => localStorage.setItem(LS_SYSTEM_PROMPT, systemPromptInput.value));
+  temperatureInput.addEventListener('input', () => {
+    temperatureVal.textContent = temperatureInput.value;
+    localStorage.setItem(LS_TEMPERATURE, temperatureInput.value);
+  });
+  topPInput.addEventListener('input', () => {
+    topPVal.textContent = topPInput.value;
+    localStorage.setItem(LS_TOP_P, topPInput.value);
+  });
+  maxTokensInput.addEventListener('input', () => localStorage.setItem(LS_MAX_TOKENS, maxTokensInput.value));
+
+  resetSettingsBtn.addEventListener('click', () => {
+    localStorage.removeItem(LS_SYSTEM_PROMPT);
+    localStorage.removeItem(LS_TEMPERATURE);
+    localStorage.removeItem(LS_TOP_P);
+    localStorage.removeItem(LS_MAX_TOKENS);
+    localStorage.setItem(LS_MODEL, DEFAULT_MODEL);
+    loadSettings();
+  });
+
+  openSettingsBtn.addEventListener('click', () => settingsModal.classList.remove('hidden'));
+  closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
+  settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) settingsModal.classList.add('hidden'); });
+
+  // ================= Sidebar =================
+  function openSidebar() {
+    sidebar.classList.remove('-ml-72');
+    sidebarOverlay.classList.remove('hidden');
+  }
+  function closeSidebar() {
+    sidebar.classList.add('-ml-72');
+    sidebarOverlay.classList.add('hidden');
+  }
+  window.closeSidebar = closeSidebar;
+  sidebarToggleBtn.addEventListener('click', () => {
+    if (sidebar.classList.contains('-ml-72')) openSidebar(); else closeSidebar();
+  });
+
+  async function refreshSessionList() {
+    sessions = await dbGetAllSessions();
+    sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+    renderSessionList();
+  }
+
+  function renderSessionList() {
+    sessionList.innerHTML = '';
+    if (sessions.length === 0) {
+      sessionList.innerHTML = '<p class="text-xs text-gray-500 text-center mt-4">Chưa có cuộc trò chuyện nào.</p>';
+      return;
+    }
+    sessions.forEach(s => {
+      const item = document.createElement('div');
+      item.className = 'session-item group flex items-center gap-2 px-3 py-2.5 rounded-lg border border-transparent hover:bg-gray-700/40 cursor-pointer transition' + (s.id === currentSessionId ? ' active border' : '');
+      item.innerHTML = `
+        <span class="flex-1 min-w-0 text-sm truncate">${escapeHtml(s.title || 'Cuộc trò chuyện mới')}</span>
+        <button class="delete-session-btn opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 transition text-sm px-1" title="Xoá">✕</button>
+      `;
+      item.querySelector('span').addEventListener('click', () => switchSession(s.id));
+      item.querySelector('.delete-session-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteSession(s.id);
+      });
+      sessionList.appendChild(item);
+    });
+  }
+
+  async function createNewSession() {
+    const session = {
+      id: genId(),
+      title: 'Cuộc trò chuyện mới',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: [],      // API-format cho NVIDIA (OpenAI-compatible)
+      display: []        // { role, text, media:{isVideo,base64} }
+    };
+    await dbPutSession(session);
+    await refreshSessionList();
+    await switchSession(session.id);
+    closeSidebar();
+  }
+
+  async function switchSession(id) {
+    const session = await dbGetSession(id);
+    if (!session) return;
+    currentSessionId = id;
+    conversation = session.messages || [];
+    sessionTitleEl.textContent = session.title || 'Cuộc trò chuyện mới';
+    renderChatFromDisplay(session.display || []);
+    renderSessionList();
+    closeSidebar();
+  }
+
+  async function deleteSession(id) {
+    if (!confirm('Xoá cuộc trò chuyện này? Không thể hoàn tác.')) return;
+    await dbDeleteSession(id);
+    if (id === currentSessionId) {
+      await refreshSessionList();
+      if (sessions.length > 0) await switchSession(sessions[0].id);
+      else await createNewSession();
+    } else {
+      await refreshSessionList();
+    }
+  }
+
+  async function persistCurrentSession(displayEntry) {
+    if (!currentSessionId) return;
+    const session = await dbGetSession(currentSessionId);
+    if (!session) return;
+    session.messages = conversation;
+    if (displayEntry) session.display = [...(session.display || []), displayEntry];
+    session.updatedAt = Date.now();
+    // Auto-title from first user text message
+    if ((session.title === 'Cuộc trò chuyện mới' || !session.title) && displayEntry && displayEntry.role === 'user' && displayEntry.text) {
+      session.title = displayEntry.text.slice(0, 40) + (displayEntry.text.length > 40 ? '…' : '');
+      sessionTitleEl.textContent = session.title;
+    }
+    await dbPutSession(session);
+    await refreshSessionList();
+  }
+
+  async function updateLastAssistantDisplay(text) {
+    if (!currentSessionId) return;
+    const session = await dbGetSession(currentSessionId);
+    if (!session) return;
+    session.display = [...(session.display || []), { role: 'assistant', text }];
+    session.updatedAt = Date.now();
+    await dbPutSession(session);
+    await refreshSessionList();
+  }
+
+  function renderChatFromDisplay(displayList) {
+    chatLog.innerHTML = '';
+    if (displayList.length === 0) {
+      chatLog.appendChild(emptyState);
+      return;
+    }
+    displayList.forEach(entry => {
+      if (entry.role === 'user') {
+        appendUserBubble(entry.text, entry.media, false);
+      } else if (entry.role === 'assistant') {
+        appendAiBubble(entry.text, false);
+      } else if (entry.role === 'error') {
+        appendErrorBubble(entry.text, false);
+      }
+    });
+    scrollToBottom();
+  }
+
+  newChatBtn.addEventListener('click', createNewSession);
+  tabNewChatBtn.addEventListener('click', createNewSession);
+  tabSessionsBtn.addEventListener('click', openSidebar);
+  tabSettingsBtn.addEventListener('click', () => settingsModal.classList.remove('hidden'));
+
+  // ================= Init =================
+  async function init() {
+    loadSettings();
+    await refreshSessionList();
+    if (sessions.length > 0) {
+      await switchSession(sessions[0].id);
+    } else {
+      await createNewSession();
+    }
+    autoResizeTextarea();
+  }
+
+  // ================= Textarea =================
+  function autoResizeTextarea() {
+    userInput.style.height = 'auto';
+    userInput.style.height = Math.min(userInput.scrollHeight, 160) + 'px';
+  }
+  userInput.addEventListener('input', autoResizeTextarea);
+  userInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  });
+
+  // ================= File attach: IMAGE =================
+  attachImageBtn.addEventListener('click', () => attachImageInput.click());
+  attachVideoBtn.addEventListener('click', () => attachVideoInput.click());
+
+  attachImageInput.addEventListener('change', () => {
+    const file = attachImageInput.files[0];
+    attachImageInput.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Vui lòng chọn file ảnh hợp lệ.');
+      return;
+    }
+    handleImageFile(file);
+  });
+
+  async function handleImageFile(file) {
+    const blobUrl = URL.createObjectURL(file);
+    pendingFile = {
+      file, assetId: null, mimeType: file.type, isVideo: false,
+      processing: true, blobUrl
+    };
+    showPreviewSkeleton(file, false, blobUrl);
+    try {
+      const assetId = await uploadFileAsAsset(file, file.type, 'Input Image', (pct) => setPreviewProgress(pct, 'Đang tải ảnh lên...'));
+      pendingFile.assetId = assetId;
+      pendingFile.processing = false;
+      finalizePreview();
+    } catch (err) {
+      alert('Không thể tải ảnh lên. Vui lòng thử lại.\n\nChi tiết: ' + (err && err.message ? err.message : err));
+      clearAttachment();
+    }
+  }
+
+  // ================= NVCF Assets API: upload file lớn theo 2 bước =================
+  // Bước 1: xin assetId + uploadUrl (presigned, hết hạn sau 1 giờ). Bước 2: PUT file thật
+  // (binary) lên uploadUrl đó qua proxy /nvidia-asset-upload. Trả về assetId để gắn vào
+  // tin nhắn gửi cho NVIDIA (xem NVIDIA_ASSET_UPLOAD_URL / handleSend).
+  async function uploadFileAsAsset(file, contentType, description, onProgress) {
+    const createRes = await fetch(NVIDIA_ASSET_CREATE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contentType: contentType || 'application/octet-stream', description })
+    });
+    if (!createRes.ok) throw new Error('Không tạo được asset (bước 1/2) — HTTP ' + createRes.status);
+    const createData = await createRes.json().catch(() => null);
+    const assetId = createData && createData.assetId;
+    const uploadUrl = createData && createData.uploadUrl;
+    if (!assetId || !uploadUrl) throw new Error('Phản hồi tạo asset không hợp lệ từ server.');
+
+    const uploadTargetUrl = NVIDIA_ASSET_UPLOAD_URL
+      + '?uploadUrl=' + encodeURIComponent(uploadUrl)
+      + '&contentType=' + encodeURIComponent(contentType || 'application/octet-stream')
+      + '&description=' + encodeURIComponent(description);
+
+    await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', uploadTargetUrl, true);
+      xhr.timeout = 180000;
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        else reject(new Error('Upload asset thất bại (bước 2/2) — HTTP ' + xhr.status));
+      };
+      xhr.ontimeout = () => reject(new Error('Hết thời gian chờ khi tải file lên (quá 3 phút).'));
+      xhr.onerror = () => reject(new Error('Kết nối bị ngắt giữa chừng khi tải file lên.'));
+      xhr.send(file);
+    });
+
+    return assetId;
+  }
+
+  // ================= File attach: VIDEO =================
+  attachVideoInput.addEventListener('change', () => {
+    const file = attachVideoInput.files[0];
+    attachVideoInput.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('video/')) {
+      alert('Vui lòng chọn file video hợp lệ.');
+      return;
+    }
+    handleVideoFile(file);
+  });
+
+  async function handleVideoFile(file) {
+    const blobUrl = URL.createObjectURL(file);
+    pendingFile = {
+      file, assetId: null, mimeType: file.type || 'video/mp4', isVideo: true,
+      processing: true, blobUrl, originalSize: file.size
+    };
+    showPreviewSkeleton(file, true, blobUrl);
+
+    try {
+      const assetId = await uploadFileAsAsset(file, pendingFile.mimeType, 'Input Video', (pct) => setPreviewProgress(pct, 'Đang tải video lên...'));
+      pendingFile.assetId = assetId;
+      pendingFile.processing = false;
+      finalizePreview();
+    } catch (err) {
+      alert('Không thể tải video lên. Vui lòng thử lại hoặc chọn video khác.\n\nChi tiết: ' + (err && err.message ? err.message : err));
+      clearAttachment();
+    }
+  }
+
+  // ================= Preview UI =================
+  function showPreviewSkeleton(file, isVideo, blobUrl) {
+    previewContainer.classList.remove('hidden');
+    previewMedia.innerHTML = '';
+    if (isVideo) {
+      const video = document.createElement('video');
+      video.src = blobUrl;
+      video.className = 'w-full h-full object-cover';
+      video.muted = true;
+      previewMedia.appendChild(video);
+    } else {
+      const img = document.createElement('img');
+      img.src = blobUrl;
+      img.className = 'w-full h-full object-cover';
+      previewMedia.appendChild(img);
+    }
+    previewName.textContent = file.name;
+    previewSize.textContent = formatBytes(file.size) + ' · ' + (isVideo ? 'Video' : 'Ảnh');
+    previewStatus.textContent = isVideo ? 'Đang tải video lên...' : 'Đang tải ảnh lên...';
+    previewProgressWrap.classList.remove('hidden');
+    previewProgressFill.style.width = '0%';
+    updateSendButtonState();
+  }
+
+  function setPreviewProgress(pct, label) {
+    previewProgressFill.style.width = pct + '%';
+    if (label) previewStatus.textContent = label + ' ' + pct + '%';
+  }
+
+  function finalizePreview() {
+    previewProgressWrap.classList.add('hidden');
+    previewStatus.textContent = 'Đã tải lên xong (' + formatBytes(pendingFile.file.size) + ') · Sẵn sàng gửi.';
+    updateSendButtonState();
+  }
+
+  removeAttachBtn.addEventListener('click', clearAttachment);
+
+  function clearAttachment(revokeBlob = true) {
+    if (revokeBlob && pendingFile && pendingFile.blobUrl) URL.revokeObjectURL(pendingFile.blobUrl);
+    pendingFile = null;
+    previewContainer.classList.add('hidden');
+    previewMedia.innerHTML = '';
+    previewProgressWrap.classList.add('hidden');
+    updateSendButtonState();
+  }
+
+  function updateSendButtonState() {
+    sendBtn.disabled = isSending || (pendingFile && pendingFile.processing);
+  }
+
+  function formatBytes(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+  }
+
+  // ================= Chat rendering =================
+  function removeEmptyState() {
+    if (emptyState && emptyState.parentNode) emptyState.remove();
+  }
+
+  function scrollToBottom() {
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
+  function appendUserBubble(text, media, scroll = true) {
+    removeEmptyState();
+    const wrap = document.createElement('div');
+    wrap.className = 'flex justify-end fade-in';
+    let mediaHtml = '';
+    if (media) {
+      const mediaSrc = media.blobUrl || (media.blob ? URL.createObjectURL(media.blob) : '');
+      if (media.isVideo) {
+        mediaHtml = `<video src="${mediaSrc}" controls class="rounded-lg mb-2 max-w-[220px] max-h-[220px]"></video>`;
+      } else {
+        mediaHtml = `<img src="${mediaSrc}" class="rounded-lg mb-2 max-w-[220px] max-h-[220px] object-cover" />`;
+      }
+    }
+    wrap.innerHTML = `
+      <div class="bubble-user px-4 py-2.5 max-w-[80%] sm:max-w-[65%] shadow-lg">
+        ${mediaHtml}
+        ${text ? `<p class="text-sm whitespace-pre-wrap break-words">${escapeHtml(text)}</p>` : ''}
+      </div>
+    `;
+    chatLog.appendChild(wrap);
+    if (scroll) scrollToBottom();
+  }
+
+  function appendAiTyping() {
+    removeEmptyState();
+    const wrap = document.createElement('div');
+    wrap.className = 'flex justify-start fade-in';
+    wrap.id = 'typing-indicator';
+    wrap.innerHTML = `
+      <div class="bubble-ai px-4 py-3 max-w-[80%] sm:max-w-[65%] shadow-lg">
+        <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+      </div>
+    `;
+    chatLog.appendChild(wrap);
+    scrollToBottom();
+  }
+
+  function removeTypingIndicator() {
+    const el = document.getElementById('typing-indicator');
+    if (el) el.remove();
+  }
+
+  function appendAiBubble(markdownText, scroll = true) {
+    removeEmptyState();
+    const wrap = document.createElement('div');
+    wrap.className = 'flex justify-start fade-in';
+    const html = marked.parse(markdownText || '');
+    wrap.innerHTML = `
+      <div class="bubble-ai px-4 py-2.5 max-w-[85%] sm:max-w-[70%] shadow-lg">
+        <div class="prose-ai text-sm">${html}</div>
+      </div>
+    `;
+    chatLog.appendChild(wrap);
+    if (scroll) scrollToBottom();
+  }
+
+  function appendErrorBubble(message, scroll = true) {
+    removeEmptyState();
+    const wrap = document.createElement('div');
+    wrap.className = 'flex justify-start fade-in';
+    wrap.innerHTML = `
+      <div class="bubble-error px-4 py-2.5 max-w-[85%] sm:max-w-[70%] shadow-lg">
+        <p class="text-sm font-medium mb-1">⚠ Đã xảy ra lỗi</p>
+        <p class="text-xs whitespace-pre-wrap break-words">${escapeHtml(message)}</p>
+      </div>
+    `;
+    chatLog.appendChild(wrap);
+    if (scroll) scrollToBottom();
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // ================= Send (XHR with upload progress) =================
+  sendBtn.addEventListener('click', handleSend);
+
+  function xhrPostJson(url, headers, body, onUploadProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', url, true);
+      xhr.timeout = 180000; // 3 phút, đủ cho video nặng
+      Object.entries(headers).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onUploadProgress) {
+          onUploadProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      };
+      xhr.onload = () => {
+        let json = null;
+        try { json = JSON.parse(xhr.responseText); } catch (e) { /* ignore */ }
+        resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, statusText: xhr.statusText, json });
+      };
+      xhr.ontimeout = () => reject(new Error('Hết thời gian chờ (quá 3 phút). File có thể quá nặng hoặc mạng quá chậm.'));
+      xhr.onerror = () => reject(new Error('Kết nối bị ngắt giữa chừng — thường do payload quá lớn bị server/CDN từ chối, hoặc mất mạng đột ngột.'));
+      xhr.send(body);
+    });
+  }
+
+  async function handleSend() {
+    if (isSending) return;
+    if (pendingFile && pendingFile.processing) return;
+
+    const text = userInput.value.trim();
+    if (!text && !pendingFile) return;
+
+    const currentFile = pendingFile;
+    const currentModel = modelSelect.value;
+    const temperature = parseFloat(temperatureInput.value);
+    const topP = parseFloat(topPInput.value);
+    const maxTokens = maxTokensInput.value ? parseInt(maxTokensInput.value, 10) : null;
+    const systemPrompt = systemPromptInput.value || DEFAULT_SYSTEM_PROMPT;
+
+    appendUserBubble(text, currentFile ? { isVideo: currentFile.isVideo, blobUrl: currentFile.blobUrl } : null);
+    await persistCurrentSession({
+      role: 'user', text,
+      // Lưu Blob thật (không phải base64) vào IndexedDB để hiển thị lại khi mở session cũ —
+      // nhẹ hơn nhiều so với base64 (không phình +33%) và IndexedDB hỗ trợ Blob trực tiếp.
+      media: currentFile ? { isVideo: currentFile.isVideo, blob: currentFile.file } : null
+    });
+
+    const userContent = [];
+    if (text) userContent.push({ type: 'text', text });
+    if (currentFile) {
+      // File đã được upload lên NVCF Assets API từ lúc đính kèm (xem uploadFileAsAsset) —
+      // ở đây chỉ cần tham chiếu assetId, KHÔNG nhúng base64 nữa (tránh vượt giới hạn 25MB
+      // của payload JSON gửi NVIDIA).
+      const assetRef = `data:${currentFile.mimeType};asset_id,${currentFile.assetId}`;
+      if (currentFile.isVideo) {
+        userContent.push({ type: 'video_url', video_url: { url: assetRef } });
+        if (!text) userContent.unshift({ type: 'text', text: 'Hãy phân tích video này.' });
+      } else {
+        userContent.push({ type: 'image_url', image_url: { url: assetRef } });
+        if (!text) userContent.unshift({ type: 'text', text: 'Hãy phân tích hình ảnh này.' });
+      }
+    }
+    conversation.push({ role: 'user', content: userContent });
+
+    userInput.value = '';
+    autoResizeTextarea();
+    clearAttachment(false); // false: không revoke blobUrl — bong bóng chat vừa thêm đang dùng nó
+    isSending = true;
+    updateSendButtonState();
+    attachImageBtn.disabled = true;
+    attachVideoBtn.disabled = true;
+    appendAiTyping();
+
+    try {
+      const body = {
+        model: currentModel,
+        messages: [{ role: 'system', content: systemPrompt }, ...conversation],
+        temperature,
+        top_p: topP
+      };
+      if (maxTokens) body.max_tokens = maxTokens;
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentFile) headers['X-Asset-Ids'] = currentFile.assetId;
+
+      const result = await xhrPostJson(NVIDIA_API_URL, headers, JSON.stringify(body), null);
+
+      removeTypingIndicator();
+
+      if (!result.ok) {
+        let errMsg = `Lỗi HTTP ${result.status} (${result.statusText}).`;
+        if (result.json && result.json.error) {
+          errMsg = typeof result.json.error === 'string' ? result.json.error : (result.json.error.message || errMsg);
+        }
+        if (result.status === 401 || result.status === 403) {
+          errMsg = 'API Key không hợp lệ hoặc không có quyền truy cập. Vui lòng kiểm tra lại NVIDIA API Key. Chi tiết: ' + errMsg;
+        } else if (result.status === 413) {
+          errMsg = 'File quá lớn để gửi lên NVIDIA API (vượt giới hạn request). Thử video ngắn hơn hoặc chất lượng thấp hơn. Chi tiết: ' + errMsg;
+        } else if (result.status === 429) {
+          errMsg = 'Đã vượt quá giới hạn request (rate limit) hoặc hết credit miễn phí. Chi tiết: ' + errMsg;
+        } else if (result.status === 0) {
+          errMsg = 'Request bị chặn hoặc không có phản hồi — có thể do CORS (trình duyệt chặn gọi thẳng NVIDIA API từ web app) hoặc mất mạng giữa chừng.';
+        }
+        appendErrorBubble(errMsg);
+        await persistCurrentSession({ role: 'error', text: errMsg });
+        conversation.pop();
+        return;
+      }
+
+      const data = result.json;
+      const msgObj = data && data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message : null;
+      const aiMessage = msgObj ? (msgObj.content || msgObj.reasoning_content || null) : null;
+
+      if (!aiMessage) {
+        const msg = 'Không nhận được nội dung phản hồi hợp lệ từ mô hình. Vui lòng thử lại.';
+        appendErrorBubble(msg);
+        await persistCurrentSession({ role: 'error', text: msg });
+        conversation.pop();
+        return;
+      }
+
+      appendAiBubble(aiMessage);
+      conversation.push({ role: 'assistant', content: aiMessage });
+      await updateLastAssistantDisplay(aiMessage);
+      await persistCurrentSession(null);
+
+    } catch (err) {
+      removeTypingIndicator();
+      let msg = 'Không thể kết nối tới NVIDIA API. Vui lòng kiểm tra kết nối mạng và thử lại.';
+      if (err && err.message) msg += '\n\nChi tiết: ' + err.message;
+      appendErrorBubble(msg);
+      await persistCurrentSession({ role: 'error', text: msg });
+      conversation.pop();
+    } finally {
+      isSending = false;
+      attachImageBtn.disabled = false;
+      attachVideoBtn.disabled = false;
+      updateSendButtonState();
+    }
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
